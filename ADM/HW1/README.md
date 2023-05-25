@@ -1,12 +1,5 @@
-# homework1
+# This is the first homework i completed for the ADM course
+here you find all the code for the exercises we had to complete on HackerRank.
+This was a useful recap to review the syntax of Python
 
-
-
-# list of elements that compose the repository:
-
-* **PDF_printout.pdf**
-the printout of all the submissions
-* **scripts.py**
-  solutions of the completed exercises.
- First  the solutions that belong to the first problem and then the second problem's solutions
 
