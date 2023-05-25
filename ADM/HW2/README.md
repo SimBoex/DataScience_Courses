@@ -16,3 +16,9 @@ The proposed script answers some research (RQs) and theoretical (TQs) questions 
 
 Jupyter notebook viewer:
 https://nbviewer.org/github/SimBoex/HW2/blob/main/ADM_Homework_2.ipynb
+
+
+
+My team was composed by:
+- Simone Boesso
+- Davide Cacciatore
