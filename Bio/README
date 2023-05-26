@@ -1,0 +1,5 @@
+# BIO course
+This was a course of bionformatics and during the final project we used some tools  to find new drugs, as well as currently used
+drugs, associated to Hypertensive Disease using a network approach.
+We used different algorithms: DIAMOnD, DIaBLE and Diffusion Based.
+We carried out enrichment analysis with different tools, and from them
