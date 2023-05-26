@@ -21,4 +21,3 @@ It's a python notebook containing all the process for functionality 2
 contains the theoretical question implemented and explained 
 
 - Functionality/visualization 1 contains both the functionality one with all its features and its visualization
-- 
