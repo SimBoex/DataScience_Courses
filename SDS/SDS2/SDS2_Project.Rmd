@@ -1,0 +1,1276 @@
+---
+title: "SDS2_Project"
+author: "Simone Boesso"
+date: "2023-06-16"
+output:
+  html_document: default
+  pdf_document: default
+---
+```{r setup, include=FALSE}
+library(knitr)
+library(tinytex)
+library(dplyr)
+library(ggplot2)
+library(R2jags)
+library(ggmcmc)
+library(bayesplot)
+library(coda)
+library(MLmetrics)
+library(pROC)
+library(titanic)
+library(GGally)
+library(ggcorrplot)
+library(corrplot)
+library(tidyverse)
+library(caret)
+library(LaplacesDemon)
+
+
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, echo = F}
+setwd("/Users/simone/Desktop/SDS2_finalProject")
+data = titanic_train
+
+```
+**Bayesian Analysis of the risk of being a survivor on the Titanic**
+\
+Everyone knows what happened during the Titanic accident, and its data are continuously studied, during my analysis I want to find what were the most influencing features for surviving and using a logistic regression model tuned with **Monte Carlo Markow Chain method** I want to predict if a person would survive or not.
+\
+**The objective** of the analysis is to find the model that maximize the accuracy in predicting if a passenger would survive or not.
+
+**The dataset** analyzed for this analysis is taken from CRAN package Titanic.
+
+Two **statistical models for binary classification** are applied: \
+-Logistic Regression (with Logit link function) with 5 features \
+-Logistic Regression (with Logit link function) with 2 features \
+
+As I said the parameters of the models are tuned with Monte Carlo Markov Chain methods, and a  Bayesian  analysis is applied to them.
+
+The analysis is divided in **4 parts:** \
+
+1. **Exploratory Data Analysis**  
+2. For each of the models: 
+    + **Parameter tuning** with Monte Carlo Markov Chain
+    + Visualization of the MCMC with **Traceplots**, **Density plots**, **Autocorrelation plots**, **Correlation matrix** of the parameters
+    + Evaluation of the model on new data 
+    + Comparison between **Bayesian approach** and **Frequentist approach** 
+3. Choice of the best model among the 4 analyzed 
+4. Conclusions
+
+Now, let's start.
+\newpage
+
+## Exploratory Data Analysis and Feature Engineering
+
+```{r, echo = F}
+data_init = titanic_train
+```
+
+The dataset is composed of 10 variables:\
+
+-**PassengerId**: ID number of every passenger \
+-**Survived **: the label if has survived or not, 0 = No, 1 = Yes \
+-**Pclass  **: the Ticket class 1 = 1st, 2 = 2nd, 3 = 3rd \
+-**Name **: the name\
+-**Sex** : the sex \
+-**Age **: the age \
+-**SibSp**: # of siblings / spouses aboard the Titanic \
+-**Parch **: # of parents / children aboard the Titanic \
+-**Ticket  **: Ticket number \
+-**Fare  **: Passenger fare \
+-**Cabin**: Cabin number \
+-**Embarked **: Port of Embarkation, C = Cherbourg, Q = Queenstown, S = Southampton \
+
+
+### Data cleaning 
+\
+I start the pre-processing of the data.
+
++ The **Cabin column** has many NA values, I will drop it. \
++ The **PassengerID** is a unique identifier for the records, I will drop it.\
+I will select the remaining columns and I omit the Na.
+\
+```{r, echo = F}
+#1. removing the useless columns
+data =titanic_train[c(2,3,5,6,7,8)]
+data = na.omit(data)
+```
+
+\newpage
+
+### Data Visualization and Exploration
+\
+Let's start with a first count of how many passengers died and survived\
+\
+
+```{r, echo = F,fig.align='center',fig.width=6, fig.height=6}
+
+passengers <- data.frame(
+  Category = c("Died", "Survived"),
+  Count = c(sum(data$Survived == 0), sum(data$Survived == 1))
+)
+
+ggplot(passengers, aes(x = Category, y = Count)) +
+  geom_bar(stat = "identity", fill = "coral") +
+  geom_text(aes(label = Count), vjust = -0.5, hjust = 0.5, size = 4) +
+  labs(x = "Category", y = "Count", title = "Survival Count",
+       caption = "Data source: Titanic Dataset") +
+  theme_classic() +
+  theme(plot.title = element_text(size = 12, face = "bold"),
+        axis.title = element_text(size = 10),
+        axis.text = element_text(size = 8),
+        plot.caption = element_text(size = 8, hjust = 0.5))
+```
+\
+
+\newpage
+
+Let's see if the sex is relevant for our analysis:
+\
+\
+```{r, echo = F,warning=FALSE,fig.align='center',fig.width=6, fig.height=6}
+data$Sex <- ifelse(data$Sex == "male", 1, 0)
+
+# Define custom colors for the plot
+colors <- c("#E69F00", "#56B4E9")  # Orange and blue
+
+# Create the plot
+ggplot(data, aes(x = Survived, fill = factor(Sex))) +
+  geom_bar(position = position_dodge(), alpha = 0.8) +
+  geom_text(stat = 'count', aes(label = stat(count)),
+            position = position_dodge(width = 1), vjust = -0.5,
+            color = "black", size = 4, fontface = "bold") +
+  scale_fill_manual(values = colors) +
+  labs(x = "Survived", y = "Count",
+       fill = "Sex", title = "Survival Count by Sex",
+       caption = "Data source: Titanic Dataset") +
+  theme_classic() +
+  theme(plot.title = element_text(size = 18, face = "bold", hjust = 0.5),
+        axis.title = element_text(size = 14),
+        axis.text = element_text(size = 12),
+        legend.position = "bottom",
+        legend.title = element_text(size = 14, face = "bold"),
+        legend.text = element_text(size = 12))
+```
+\
+\
+Yep a lot, more females survived than males.
+\
+
+\newpage
+
+Now let's look at the type of class they were in:
+\
+\
+```{r, echo = F,fig.align='center',fig.width=6, fig.height=6}
+ggplot(data, aes(x = Survived, fill = as.factor(Pclass))) +
+  geom_bar(position = position_dodge()) +
+  geom_text(stat = 'count', aes(label = stat(count)),
+            position = position_dodge(width = 1), vjust = -0.5) +
+  scale_x_continuous(breaks = c(0, 1)) +
+  theme_classic() +
+  labs(x = "Survived", y = "Count", title = "Survival Count by Pclass",
+       caption = "Data source: Titanic Dataset") +
+  theme(plot.title = element_text(size = 18, face = "bold", hjust = 0.5),
+        axis.title = element_text(size = 14),
+        axis.text = element_text(size = 12),
+        legend.title = element_blank(),  # Remove the legend title
+        legend.text = element_text(size = 12))
+```
+\
+\
+Being in **1st class** was a big advantage.
+\
+
+\newpage
+
+
+Let's do the same but for the **Parch attribute**: # of parents / children aboard the Titanic \
+
+\
+```{r, echo = F,fig.align='center',fig.width=6, fig.height=6}
+ggplot(data, aes(x = Survived, fill = as.factor(Parch))) +
+  geom_bar(position = position_dodge()) +
+  geom_text(stat = 'count', aes(label = stat(count)),
+            position = position_dodge(width = 1), vjust = -0.5) +
+  scale_x_continuous(breaks = c(0, 1)) +
+  theme_classic() +
+  labs(x = "Survived", y = "Count", title = "Survival Count by Parch",
+       caption = "Data source: Titanic Dataset") +
+  theme(plot.title = element_text(size = 18, face = "bold", hjust = 0.5),
+        axis.title = element_text(size = 14),
+        axis.text = element_text(size = 12),
+        legend.title = element_blank(),
+        legend.text = element_text(size = 12))
+```
+\
+So it doesn't seems as relevant as the Pclass and Sex
+\
+
+\newpage
+
+let's do the same for **SibSp attribute**:  # of siblings / spouses aboard the Titanic 
+\
+```{r, echo = F,fig.align='center',fig.width=6, fig.height=6}
+ggplot(data, aes(x = Survived, fill = as.factor(SibSp))) +
+  geom_bar(position = position_dodge()) +
+  geom_text(stat = 'count', aes(label = stat(count)),
+            position = position_dodge(width = 1), vjust = -0.5) +
+  scale_x_continuous(breaks = c(0, 1)) +
+  theme_classic() +
+  labs(x = "Survived", y = "Count", title = "Survival Count by SibSp",
+       caption = "Data source: Titanic Dataset") +
+  theme(plot.title = element_text(size = 18, face = "bold", hjust = 0.5),
+        axis.title = element_text(size = 14),
+        axis.text = element_text(size = 12),
+        legend.title = element_blank(),
+        legend.text = element_text(size = 12))
+
+```
+\
+
+\newpage
+
+\
+Finally, I'm looking at the **age attribute** grouping by 10 years
+```{r, echo = F,fig.align='center',fig.width=6, fig.height=6}
+# Create age groups with ranges
+age_ranges <- cut(data$Age, breaks = seq(0, max(data$Age) + 10, by = 10), include.lowest = TRUE)
+age_labels <- paste(seq(0, max(data$Age) - 9, by = 10), seq(9, max(data$Age), by = 10), sep = "-")
+data$Age_Group <- factor(age_ranges, labels = age_labels)
+
+# Create the bar plot
+ggplot(data, aes(x = Survived, fill = Age_Group)) +
+  geom_bar(position = position_dodge()) +
+  geom_text(stat = 'count', aes(label = stat(count)),
+            position = position_dodge(width = 1), vjust = -0.5) +
+  scale_x_continuous(breaks = c(0, 1)) +
+  theme_classic() +
+  labs(x = "Survived", y = "Count", title = "Survival Count by Age Group",
+       caption = "Data source: Titanic Dataset") +
+  theme(plot.title = element_text(size = 18, face = "bold", hjust = 0.5),
+        axis.title = element_text(size = 14),
+        axis.text = element_text(size = 12),
+        legend.title = element_blank(),
+        legend.text = element_text(size = 12))
+
+```
+\
+Well, as before I don't see it as really relevant like sex and Pclass
+\
+
+\newpage
+
+Now, let's look at the **correlation matrix** of my variables:
+\
+\
+```{r, echo = F,fig.align='center',fig.width=6, fig.height=6}
+data_corr <- data[c(1, 2, 4, 5, 6)]
+corr_matrix <- cor(data_corr)
+
+ggcorrplot(corr_matrix, 
+           type = "lower",
+           lab = TRUE,
+           lab_size = 3,
+           colors = c("#D9F0A3", "#4E79A7", "#E15759"),
+           method = "circle",
+           title = "Correlation Matrix",
+           ggtheme = theme_classic()) +
+  labs(caption = "Data source: Titanic Dataset") +
+  theme(plot.caption = element_text(size = 10, hjust = 1))
+```
+\
+\
+Looking at the plot we see there are some linear dependencies.
+Conversely, as the "Pclass" value decreases (from 3rd class to 2nd class or 1st class), the likelihood of being a "survived" passenger (i.e., 1) tends to increase.
+\
+
+
+**Standardization of the variables:** 
+Before the inferential analysis, I proceed to standardize my input variables, in fact they have different unit of measure.
+
+```{r, echo = F}
+data$Age = scale(data$Age)
+data$SibSp = scale(data$SibSp)
+data$Parch = scale(data$Parch)
+data$Pclass= scale(data$Pclass)
+data$Sex = scale(data$Sex)
+```
+
+\newpage
+
+## The Inferential Analysis
+\
+As I said, the purpose of the analysis is to forecast whether a person  will survive or not maximizing the accuracy.
+\
+Before starting, I split the database into a train and eval parts. 
+I randomly split the dataset into a $80\%$ train-set and $20\%$ eval-set and I check their proportions of GTs.
+
+```{r, echo = F, result=F}
+set.seed(123)
+index = sample(c(rep(0,0.8*nrow(data)), rep(1,0.2*nrow(data))))
+train= data[index == 0,]
+eval= data[index == 1,]
+```
+
+```{r ,echo=F, result = F}
+label <- as.factor(train$Survived)
+prop.table(table(label))
+```
+
+```{r, echo=F, result = F}
+label <- as.factor(eval$Survived)
+prop.table(table(label))
+```
+Now i can start with the analysis.
+
+## Modelling
+
+### Model: Logistic Regression (Logit)
+Gibbs sampling of  regression models  use normal prior distributions over the weights, 
+so the **assumptions** are the following:
+
+$$Y_i \sim Ber(logit(p_i))$$
+$$logit(p_i)=log\bigg(\frac{p_i}{1-p_i}\bigg)=\beta_0 + \beta_1x_{1_i} + \beta_2x_{2_i}+\beta_3x_{3_i} + \beta_4x_{4_i}+ \beta_5x_{5_i}$$
+
+ the prior parameters $\beta$ will have a prior distribution with $\mu = 0$ and $\sigma = 0.0001$
+
+$$\beta_i\sim N(0,0.0001)$$
+
+for $i=1,2,3,4,5$.
+
+#### Implementation of the model with RJags
+For the implementation i use  Rjags with 2 chains and a burnin of 1000 iterations.
+
+```{r}
+set.seed(123)
+
+#Write the model in BUGS language
+N = length(train$Survived)
+model_func <- function(){
+  #likelihood
+  for (i in 1:N){
+    y[i] ~ dbern(p[i])
+    #The logit function can be used to convert any real number to a probability.
+    logit(p[i]) =  beta0 + beta1*x1[i] + beta2*x2[i] + beta3*x3[i] + beta4*x4[i] +beta5*x5[i]
+  }
+  
+  #prior beta parameters ( a non informative prior)
+  beta0 ~ dnorm(0, 0.0001)
+  beta1 ~ dnorm(0, 0.0001)
+  beta2 ~ dnorm(0, 0.0001)
+  beta3 ~ dnorm(0, 0.0001)
+  beta4 ~ dnorm(0, 0.0001)
+  beta5 ~ dnorm(0, 0.0001)
+
+}
+```
+
+
+```{r, echo = F, eval = T}
+#Data for the sampling
+data_sim =  list("y" = as.vector(train$Survived), "N" = N,
+                  "x1" = as.vector(train$Pclass), "x2" = as.vector(train$Sex), "x3" = as.vector(train$Age), "x4" = as.vector(train$SibSp),"x5" = as.vector(train$Parch))
+
+#Parameters
+params = c('beta0', 'beta1', 'beta2', 'beta3', 'beta4','beta5')
+```
+
+
+```{r, results = F, eval = T}
+set.seed(123)
+model = jags(data = data_sim,
+             model.file = model_func,
+             parameters.to.save = params,            
+             n.chains = 2,
+             n.iter = 10000, 
+             n.burnin = 1000, 
+             n.thin = 10) 
+
+```
+
+These are the results we get:
+
+```{r, echo = F}
+mu.vect = c(-0.506, -1.110, -1.287, -0.653, -0.292, 0.012, 518.303)
+sd.vect = c(0.115, 0.130, 0.123, 0.132, 0.134, 0.113, 3.575 )
+
+quantile_25 = c(-0.579, -1.199 , -1.370 , -0.741, -0.382 , -0.063, 515.767)
+quantile_50 = c(-0.506, -1.112, -1.285,  -0.650, -0.291, 0.011,517.706)
+quantile_75 = c(-0.430, -1.020, -1.205, -0.562, -0.195, 0.090,520.053)
+Rhat = c(1.001, 1.001, 1.002, 1.000, 1.001, 1.000,1.001)
+n.eff = c(1800,1800,1200,1800,1800, 1800,1800)
+df = data.frame('mean vect'=mu.vect, 'sd vect'=sd.vect, 'Quantile_0.25'=quantile_25, 'Quantile_0.50'=quantile_50, 'Quantile_0.75'=quantile_75, 'R hat'=Rhat, 'N_eff'=n.eff)
+row.names(df) = c('Beta_0', 'Beta_1-Pclass', 'Beta_2-Sex', 'Beta_3-Age', 'Beta_4-SibSp', 'Beta_5-Parch', 'Deviance') 
+```
+
+```{r, echo = F}
+kable(df)
+pD = 6.4
+DIC = 524.7
+```
+
+
+
+
+The **DIC** (Deviance Information Criterion)  is used for comparing different models based on their goodness of fit and complexity.  Similar to AIC, DIC incorporates a penalty for model complexity, aiming to avoid overfitting. It's represented as
+
+$$DIC = D_{\hat \theta}(y)+2p_D = \hat D_{avg}(y)+p_D= \\ 2\hat D_{avg}(y)-D_{\hat \theta}(y)$$
+Where \
+$D_{\hat\theta}(y)=-2log  f(y,\hat\theta(y))$, \
+$\hat D_{avg}(y) \approx\frac{1}{M}\sum_j -2logf(y|\theta^{(j)})$ \
+and $p_D$ is the effective number of parameters. \
+
+
+DIC's asymptotic approximation becomes more reliable as the sample size increases, making it particularly useful for larger datasets \
+The minimum DIC estimates the “best” model in the same spirit as AIC. \
+When comparing different models using DIC, the model with the lower DIC value is preferred. This corresponds to a model with a better balance between goodness of fit (larger likelihood) and complexity (smaller number of parameters). \
+The DIC is a comparative index, so I will compare it with all the models in order to choose the best one.
+\
+
+If the Rhat values are substantially larger than one, the chains haven’t mixed properly and the posterior estimates cannot be trusted. We can also visually assess how well the chains have mixed using the traceplots
+
+#### Trace-plots
+
+Let's observe now the stationary regions. When the Gibbs sampler has converged to the posterior distribution, it means that the samples of each parameter exhibit less fluctuation or variability, indicating a more stable estimate.
+In particular the 2 chains give the possibility to see if given different initialization of the parameters, we reach the same target distribution.
+
+```{r, echo = F,fig.align='center'}
+knitr::opts_chunk$set(fig.width=5, fig.height=5) 
+traceplot(model,mfrow = c(2, 2))
+```
+
+The traceplot explains the pattern followed by the parameter for every iteration of the Markov Chains. \
+From the plot we can see that the processes look stationary: it means that the trend of the parameter, with infinite iterations, becomes constant.
+
+\newpage
+
+
+#### Density
+
+From the density plot we can observe the distribution of the estimated parameters. 
+
+The mean of the distribution represents the estimate of the parameters ("$\mu.vect$") since the distributions are quite symmetric and so the medians are not needed.
+
+```{r, echo = F,fig.align='center'}
+mcmc_dens_overlay(model$BUGSoutput$sims.array)
+```
+
+
+The next step is  to study the probability of the parameters  with the **Credible Intervals**.
+\
+I use **Highest Posterior Density interval (HPD)**.
+
+The particularity of the HPD interval is that the posterior density for every point in the confidence region $I_{\alpha}$ is higher than the posterior density for any point outside of this set.
+
+The HPD intervals at level $\alpha = 0.05$ are the following
+
+```{r, echo = F}
+obj = as.mcmc(model)
+kable(data.frame(HPDinterval(obj, prob = 0.95)[1]))
+```
+
+The intervals effectively contain the values of the estimated parameters.
+
+
+#### Correlation between parameters
+
+Above we've seen the plots regarding the behavior of the Markov Chains from different point of view. \
+Furthermore, looking closely to the graphs, we can notice that the parameters follow very similar patterns and have a similar distribution. \
+These aspects may suggest us to look at the correlation between them and to see whether these values are high:
+
+```{r, echo = F,fig.align='center'}
+correlation <- round(cor(model$BUGSoutput$sims.matrix), 2)
+
+corrplot(correlation, 
+          method = "circle",
+          type = "lower",
+          tl.cex = 0.7,
+          tl.col = "black",
+          tl.srt = 45,
+          col = c("#D9F0A3", "#4E79A7", "#E15759"),
+          title = "Correlation Matrix",
+          addCoef.col = "black",
+          number.cex = 0.7,
+          cl.pos = "n",
+          diag = FALSE,
+          tl.offset = 0.6,
+          mar = c(0, 0, 2, 0)
+)
+```
+
+As expected, there is a correlation between them!
+
+\newpage
+
+#### Approximation Error
+
+To evaluate the approximation error I use the **MCSE** estimate: the MCSE (Monte Carlo Standard Error) is an estimate of the inaccuracy of Monte Carlo samples, usually regarding the expectation of posterior samples from  Monte Carlo Markov Chain algorithms.
+
+I estimated the MCSE with the $MCSE$ function from LaplacesDemon package obtaining the following results:
+
+```{r, echo = F}
+knitr::opts_chunk$set(fig.width=3, fig.height=6) 
+AE_beta0 = MCSE(model$BUGSoutput$sims.array[,1,"beta0"])
+AE_beta1 = MCSE(model$BUGSoutput$sims.array[,1,"beta1"])
+AE_beta2 = MCSE(model$BUGSoutput$sims.array[,1,"beta2"])
+AE_beta3 = MCSE(model$BUGSoutput$sims.array[,1,"beta3"])
+AE_beta4 = MCSE(model$BUGSoutput$sims.array[,1,"beta4"])
+AE_beta5 = MCSE(model$BUGSoutput$sims.array[,1,"beta5"])
+
+
+ae = data.frame('Approximation_Error' = c(AE_beta0, AE_beta1, AE_beta2, AE_beta3,AE_beta4 ,AE_beta5))
+row.names(ae) = c('beta_0', 'beta_1', 'beta_2', 'beta_3', 'beta_4', 'beta_5')
+
+kable(ae)
+```
+\
+When the MCSE is close to 0, it suggests that the Monte Carlo sampling procedure has converged, and the estimates are stable. It implies that the algorithm has generated a sufficient number of samples to approximate the posterior distribution accurately, resulting in reliable parameter estimates.
+
+
+#### Auto-correlation
+\
+\
+In general, lower autocorrelation values are preferred, as they indicate a higher degree of independence between consecutive samples in the chain. This indicates better mixing and convergence.For the lag1 autocorrelation, values close to 0 or within the range of -0.1 to 0.1 are generally considered acceptable. Larger absolute values of autocorrelation, such as above 0.2, may indicate slow mixing and convergence
+\
+
+```{r, echo = F}
+knitr::opts_chunk$set(fig.width=8, fig.height=3)
+```
+
+```{r, echo = F, message = F, warning=F}
+par(mfrow = c(1,2))
+acf(model$BUGSoutput$sims.array[,1,1], col = 'darkblue', lwd = 2, main = expression(paste(beta[0], ' - Chain 1')))
+grid()
+acf(model$BUGSoutput$sims.array[,2,1], col = 'dodgerblue', lwd = 2, main = expression(paste(beta[0], ' - Chain 2')))
+grid()
+
+acf(model$BUGSoutput$sims.array[,1,2], col = 'darkblue', lwd = 2, main = expression(paste(beta[1], ' - Chain 1')))
+grid()
+acf(model$BUGSoutput$sims.array[,2,2], col = 'dodgerblue', lwd = 2, main = expression(paste(beta[1], ' - Chain 2')))
+grid()
+
+acf(model$BUGSoutput$sims.array[,1,3], col = 'darkblue', lwd = 2, main = expression(paste(beta[2], ' - Chain 1')))
+grid()
+acf(model$BUGSoutput$sims.array[,2,3], col = 'dodgerblue', lwd = 2, main = expression(paste(beta[2], ' - Chain 2')))
+grid()
+
+acf(model$BUGSoutput$sims.array[,1,4], col = 'darkblue', lwd = 2, main = expression(paste(beta[3], ' - Chain 1')))
+grid()
+acf(model$BUGSoutput$sims.array[,2,4], col = 'dodgerblue', lwd = 2, main = expression(paste(beta[3], ' - Chain 2')))
+grid()
+
+acf(model$BUGSoutput$sims.array[,1,5], col = 'darkblue', lwd = 2, main = expression(paste(beta[4], ' - Chain 1')))
+grid()
+acf(model$BUGSoutput$sims.array[,2,5], col = 'dodgerblue', lwd = 2, main = expression(paste(beta[4], ' - Chain 2')))
+grid()
+
+acf(model$BUGSoutput$sims.array[,1,6], col = 'darkblue', lwd = 2, main = expression(paste(beta[5], ' - Chain 1')))
+grid()
+acf(model$BUGSoutput$sims.array[,2,6], col = 'dodgerblue', lwd = 2, main = expression(paste(beta[5], ' - Chain 2')))
+grid()
+```
+
+```{r, echo = T,fig.align='center'}
+autocorr.diag(as.mcmc(model))
+```
+\
+so we get quite good samples that are expressing the assumption of being independent with larger lag!
+\
+
+
+\newpage
+
+#### Geweke Diagnostic 
+```{r, result = F,echo = F, eval = T,fig.align='center'}
+geweke.diag(as.mcmc(model))[[2]]
+```
+
+\
+This is based on a test for equality of the means of the first and last part of a Markov Chain (by default the first 10% and the last 50%).\
+The null hypothesis in the test is that two parts of the chain come from the same distribution, and to study it it's used a mean difference test. \
+If the two averages are equal it is likely that the chain will converge.\
+\
+The test statistic is a standard Z-score: the difference between the two sample means divided by its estimated standard error adjusted for autocorrelation.\
+If the Z-scores are close to zero and within a reasonable range (-2 to 2), it generally indicates convergence.
+But even if the Geweke test result is slightly outside the typical range, it's important to consider it alongside other convergence diagnostics and visualizations to form a comprehensive assessment of the MCMC results.
+
+```{r, echo = F}
+ae = data.frame('Z.score_Chain1' = c(0.7100, 0.7147 , 0.2883, 0.6285,0.3892 , 0.1774, 1.9707), 
+                'Z.score_Chain2' = c(-0.41910, 0.37770, 0.65926, -0.03605, 1.10347,-2.39083, 0.21125))
+                                     
+row.names(ae) = c('Beta_0', 'Beta_1', 'Beta_2', 'Beta_3', 'Beta_4','Beta5','deviance')
+kable(ae)
+```
+
+#### Evaluation time for the bayesian linear regression model
+
+Now that the parameters have been estimated, it's time to do the first forecast on the eval set: 
+
+```{r}
+#Parameters
+beta0 = model$BUGSoutput$summary["beta0", "mean"]
+beta1 = model$BUGSoutput$summary["beta1", "mean"]
+beta2 = model$BUGSoutput$summary["beta2", "mean"]
+beta3 = model$BUGSoutput$summary["beta3", "mean"]
+beta4 = model$BUGSoutput$summary["beta4", "mean"]
+beta5 = model$BUGSoutput$summary["beta5", "mean"]
+
+
+
+x = eval[2:6]
+y = eval[,1]
+xTb = beta0 + beta1*x[1] + beta2*x[2] + beta3*x[3] + beta4*x[4] +  beta4*x[5]
+
+
+
+sig_fun = function(xTb){
+  probs = rep(NA, length(xTb[,1]))
+  for(i in 1:length(xTb[,1])){
+    probs[i] = 1/(1+exp(-xTb[i,1]))
+  }
+  return (probs)
+}
+
+
+predictions_t = function(probs, t){
+  predictions = rep(NA, length(probs))
+  for(i in 1:length(probs)){
+    if(probs[i]>t)
+      predictions[i] = 1
+    else
+      predictions[i] = 0
+  }
+  return(predictions)
+}
+
+probs = sig_fun(xTb)
+roc <- roc(y, probs)
+```
+
+```{r, echo=F ,warning=FALSE,fig.width=4, fig.height=4,fig.align='center'}
+
+plot(roc, col="blue", lwd=2)
+roc
+
+```
+\
+
+\newpage
+
+\
+Before selecting the best threshold, it's good to observe the ROC curves for having an idea of the performance of our model.\
+The ROC curve plots **Sensitivity** (true positive rate) against the **Specificity** (true negative rate) \
+This seems good, and we can get an estimate of its average performance using the Auroc 0.8608.
+\
+Since we are dealing with probabilities, the obvious choice is to set the threshold to 0.5.\
+However in some context this is not the best idea, so we take the threshold that maximize the accuracy with our training dataset.\
+
+
+
+```{r, echo = F}
+knitr::opts_chunk$set(fig.width=6, fig.height=6) 
+```
+
+Now i find the threshold that maximizes the accuracy.\
+
+```{r, echo = F, results=T,warning = F, message=FALSE }
+
+
+accuracy_values <- c()
+
+# Iterate through a range of threshold values
+for (threshold in seq(0, 1, by = 0.01)) {
+  # Make predictions based on the current threshold
+  predictions <- predictions_t(probs, threshold)
+  
+  confusion <- confusionMatrix(as.factor(predictions), as.factor(y))
+  
+  accuracy <- confusion$overall['Accuracy']
+  accuracy <- round(accuracy, 2)
+
+  accuracy_values <- c(accuracy_values, accuracy)
+}
+
+max_accuracy <- max(accuracy_values)
+max_threshold <- seq(0, 1, by = 0.01)[which.max(accuracy_values)]
+
+print("The maximum accuracy is:")
+print(max_accuracy)
+print("The corresponding threshold is:")
+print(max_threshold)
+
+
+
+```
+
+
+#### Confusion Matrix
+```{r, result = T,echo = F,fig.width=4, fig.height=4,fig.align='center'}
+preds <- predictions_t(probs, max_threshold)
+confusion <- confusionMatrix(as.factor(preds), as.factor(y))
+precision <- confusion$byClass['Precision']
+precision <- round(precision, 2)
+print(precision)
+recall <- confusion$byClass['Recall']
+recall <- round(recall, 2)
+
+recall <- round(recall, 2)
+
+print(recall)
+data = as.data.frame(confusion$table)
+
+ggplot(data, aes(x = Reference, y = Prediction)) +
+  geom_tile(aes(fill = Freq), color = "white") +
+  scale_fill_gradient(low = "white", high = "red") +
+  geom_text(aes(label = Freq), vjust = -1) +
+  labs(x = "Actual", y = "Predicted") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+
+#### Comparison with the Frequentist approach
+
+After observing the behaviour and the goodness of the parameters, it's time to compare the obtained model with the estimated parameters of the frequentist approach. \
+In order to do that I decide to use the $glm$ package from R.
+
+
+##### Traning phase
+
+```{r, results = T, warning = F}
+freq = glm(Survived ~ Pclass + Sex +  Age +  SibSp + Parch, family = binomial(link = "logit"),data=train)
+```
+
+
+```{r, results = T, warning = F, echo = F}
+intercept <- -0.4979
+pclass <- -1.0948
+sex <- -1.2704
+age <- -0.6462
+sibsp <- -0.2816
+parch <- 0.0122
+
+coefficients <- data.frame(
+  Variable = c("Intercept", "Pclass", "Sex", "Age", "SibSp", "Parch"),
+  Coefficient = c(intercept, pclass, sex, age, sibsp, parch)
+)
+
+coefficients
+```
+ 
+Residual Deviance: 512.2 and AIC: 524.2 \
+
+The estimated parameters are pretty close to the parameters studied in the Bayesian approach.
+
+In order to compare the models, I use the same techniques used above on the eval (ROC curve + evaluation of the indices from the confusion matrix)
+
+##### Evaluation time for the frequentist Model
+```{r, echo = F,warning = F,fig.width=4, fig.height=4,fig.align='center'}
+preds = predict(freq, eval)
+y = eval$Survived
+
+roc <- roc(y, preds)
+plot(roc, col="blue", lwd=2)
+roc
+```
+
+\newpage
+
+Now i find the best threshold that maximizes the accuracy.\
+```{r, echo = F, results=T,warning=F}
+# Calculate the predicted probabilities
+probs <- predict(freq, type = "response",eval)
+accuracy_values <- c()
+
+# Iterate through a range of threshold values
+for (threshold in seq(0, 1, by = 0.01)) {
+  # Make predictions based on the current threshold
+  predictions <- predictions_t(probs, threshold)
+  confusion <- confusionMatrix(as.factor(predictions), as.factor(y))
+  
+  accuracy <- confusion$overall['Accuracy']
+  accuracy <- round(accuracy, 2)
+
+  accuracy_values <- c(accuracy_values, accuracy)
+}
+
+max_accuracy <- max(accuracy_values)
+max_threshold <- seq(0, 1, by = 0.01)[which.max(accuracy_values)]
+
+print("The maximum accuracy is:")
+print(max_accuracy)
+print("The corresponding threshold is:")
+print(max_threshold)
+
+predictions <- predictions_t(probs, max_threshold)
+confusion <- confusionMatrix(as.factor(predictions), as.factor(y))
+precision <- confusion$byClass['Precision']
+precision <- round(precision, 2)
+print(precision)
+recall <- confusion$byClass['Recall']
+recall <- round(recall, 2)
+print(recall)
+```
+
+
+#### Confusion Matrix
+
+
+```{r, echo = F,fig.width=4, fig.height=4,fig.align='center'}
+data = as.data.frame(confusion$table)
+
+ggplot(data, aes(x = Reference, y = Prediction)) +
+  geom_tile(aes(fill = Freq), color = "white") +
+  scale_fill_gradient(low = "white", high = "red") +
+  geom_text(aes(label = Freq), vjust = -1) +
+  labs(x = "Actual", y = "Predicted") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+\
+\
+\
+\
+
+Let's now prooced with the same analysis, but using less parameters. In particular, i want to use only the sex  and the ticket class because i think they are the most meaningful variables.
+
+
+### Model1:Logistic Regression(Logit)
+Gibbs sampling of  regression models typically use normal prior distributions over the weights, 
+so the assumptions are the following:
+
+$$Y_i \sim Ber(logit(p_i))$$
+$$logit(p_i)=log\bigg(\frac{p_i}{1-p_i}\bigg)=\beta_0 + \beta_1x_{1_i} + \beta_2x_{2_i}$$
+
+ the prior parameters $\beta$ will have a prior distribution with $\mu = 0$ and $\sigma = 0.0001$
+
+$$\beta_i\sim N(0,0.0001)$$
+
+for $i=1,2$.
+
+#### Implementation of the model with RJags
+
+I repet the same steps as before but reducing the number of parameters to 4.
+```{r}
+set.seed(123)
+#Write the model in BUGS language
+N = length(train$Survived)
+model_func <- function(){
+  #model
+  for (i in 1:N){
+    y[i] ~ dbern(p[i])
+    #The logit function can be used to convert any real number to a probability.
+    logit(p[i]) =  beta0 + beta1*x1[i] + beta2*x2[i] 
+  }
+  
+  #prior beta parameters ( a non informative prior)
+  beta0 ~ dnorm(0, 0.0001)
+  beta1 ~ dnorm(0, 0.0001)
+  beta2 ~ dnorm(0, 0.0001)
+
+}
+```
+
+
+```{r, echo = F, eval = T}
+#Data for the sampling
+data_sim =  list("y" = as.vector(train$Survived), "N" = N,
+                  "x1" = as.vector(train$Pclass), "x2" = as.vector(train$Sex))
+
+#Parameters
+params = c('beta0', 'beta1', 'beta2')
+```
+
+
+```{r, echo = F,results = F, eval = T}
+model1 = jags(data = data_sim,
+             model.file = model_func,
+             parameters.to.save = params,            
+             n.chains = 2,
+             n.iter = 10000, 
+             n.burnin = 1000, 
+             n.thin = 10) 
+model1
+```
+
+These are the results we get:
+  
+```{r, echo = F}
+mu.vect = c(-0.478, -0.832, -1.267,543.003)
+sd.vect = c(0.108, 0.110, 0.111, 2.571 )
+
+quantile_25 = c(-0.548, -0.907  , -1.343 , 541.192)
+quantile_50 = c(-0.476, -0.830 , -1.267 ,  542.333)
+quantile_75 = c(-0.408   , -0.759, -1.191, 544.170)
+Rhat = c(1.002, 1.002, 1.001, 1.001)
+n.eff = c(990,1000,1800,1800)
+df = data.frame('mean vect'=mu.vect, 'sd vect'=sd.vect, 'Quantile_0.25'=quantile_25, 'Quantile_0.50'=quantile_50, 'Quantile_0.75'=quantile_75, 'R hat'=Rhat, 'N_eff'=n.eff)
+row.names(df) = c('Beta_0', 'Beta_1-Pclass', 'Beta_2-Sex', 'Deviance') 
+```
+
+```{r, echo = T}
+kable(df)
+pD = 3.3
+DIC = 546.3
+```
+
+```{r, echo = F,fig.align='center'}
+knitr::opts_chunk$set(fig.width=5, fig.height=5) 
+traceplot(model1,mfrow = c(2, 2))
+```
+\
+
+\newpage
+
+#### Density
+
+\
+```{r, echo = F,fig.align='center'}
+mcmc_dens_overlay(model1$BUGSoutput$sims.array)
+```
+\
+ to check if the mean is inside the HPD intervals: \
+ 
+#### HPD intervals
+
+```{r, echo = F}
+obj = as.mcmc(model1)
+kable(data.frame(HPDinterval(obj, prob = 0.95)[1]))
+```
+Let's plot the correlation matrix: \
+
+\newpage
+
+#### Correlation between parameters
+
+```{r, echo = F,fig.align='center',fig.width=4, fig.height=4,fig.align='center'}
+correlation <- round(cor(model1$BUGSoutput$sims.matrix), 2)
+
+corrplot(correlation, 
+          method = "circle",
+          type = "lower",
+          tl.cex = 0.7,
+          tl.col = "black",
+          tl.srt = 45,
+          col = c("#D9F0A3", "#4E79A7", "#E15759"),
+          title = "Correlation Matrix",
+          addCoef.col = "black",
+          number.cex = 0.7,
+          cl.pos = "n",
+          diag = FALSE,
+          tl.offset = 0.6,
+          mar = c(0, 0, 2, 0)
+)
+```
+
+#### Approximation Error
+
+\
+To evaluate the approximation error I use the **MCSE** estimate: the MCSE (Monte Carlo Standard Error) is an estimate of the inaccuracy of Monte Carlo samples, usually regarding the expectation of posterior samples from  Monte Carlo Markov Chain algorithms.
+
+```{r, echo = F}
+knitr::opts_chunk$set(fig.width=3, fig.height=6) 
+AE_beta0 = MCSE(model1$BUGSoutput$sims.array[,1,"beta0"])
+AE_beta1 = MCSE(model1$BUGSoutput$sims.array[,1,"beta1"])
+AE_beta2 = MCSE(model1$BUGSoutput$sims.array[,1,"beta2"])
+
+
+
+ae = data.frame('Approximation_Error' = c(AE_beta0, AE_beta1, AE_beta2))
+row.names(ae) = c('beta_0', 'beta_1', 'beta_2')
+
+kable(ae)
+```
+
+\newpage
+
+#### Auto-correlation
+
+\
+In general, lower autocorrelation values are preferred, as they indicate a higher degree of independence between consecutive samples in the chain. This indicates better mixing and convergence.For the lag1 autocorrelation, values close to 0 or within the range of -0.1 to 0.1 are generally considered acceptable. Larger absolute values of autocorrelation, such as above 0.2, may indicate slow mixing and convergence
+\
+```{r, echo = F}
+knitr::opts_chunk$set(fig.width=8, fig.height=3)
+```
+
+
+```{r, echo = F, message = F, warning=F,fig.align='center'}
+par(mfrow = c(1,2))
+acf(model1$BUGSoutput$sims.array[,1,1], col = 'darkblue', lwd = 2, main = expression(paste(beta[0], ' - Chain 1')))
+grid()
+acf(model1$BUGSoutput$sims.array[,2,1], col = 'dodgerblue', lwd = 2, main = expression(paste(beta[0], ' - Chain 2')))
+grid()
+
+acf(model1$BUGSoutput$sims.array[,1,2], col = 'darkblue', lwd = 2, main = expression(paste(beta[1], ' - Chain 1')))
+grid()
+acf(model1$BUGSoutput$sims.array[,2,2], col = 'dodgerblue', lwd = 2, main = expression(paste(beta[1], ' - Chain 2')))
+grid()
+
+acf(model1$BUGSoutput$sims.array[,1,3], col = 'darkblue', lwd = 2, main = expression(paste(beta[2], ' - Chain 1')))
+grid()
+acf(model1$BUGSoutput$sims.array[,2,3], col = 'dodgerblue', lwd = 2, main = expression(paste(beta[2], ' - Chain 2')))
+grid()
+
+
+
+grid()
+```
+
+\
+
+```{r, echo = T,fig.align='center'}
+autocorr.diag(as.mcmc(model1))
+```
+\
+so we get quite good samples that are expressing the assumption of being independent!
+
+#### Geweke Diagnostic
+
+\
+This is based on a test for equality of the means of the first and last part of a Markov Chain (by default the first 10% and the last 50%).\
+The null hypothesis in the test is that two parts of the chain come from the same distribution, and to study it it's used a mean difference test. \
+If the two averages are equal it is likely that the chain will converge.\
+\
+The test statistic is a standard Z-score: the difference between the two sample means divided by its estimated standard error adjusted for autocorrelation.\
+If the Z-scores are close to zero and within a reasonable range (-2 to 2), it generally indicates convergence.
+But even if the Geweke test result is slightly outside the typical range, it's important to consider it alongside other convergence diagnostics and visualizations to form a comprehensive assessment of the MCMC results.
+
+```{r, echo = F, eval = T,fig.align='center'}
+geweke.diag(as.mcmc(model1))[[1]]
+```
+
+```{r, echo = F}
+ae = data.frame('Z.score_Chain1' = c(-0.6649,  -0.1951,   0.2668,  -0.9564), 
+                'Z.score_Chain2' = c(0.8563,   1.7230,   0.8705,   0.5528))
+                                     
+row.names(ae) = c('Beta_0', 'Beta_1', 'Beta_2','Deviance')
+kable(ae)
+```
+
+\newpage
+
+#### Evaluatio time for the bayasian linear regression Model1
+
+
+I proceed with the same analysis as before, i plot the ROC and visualize the AUROC value
+```{r, echo=F,warning = F}
+#Parameters
+beta0 = model1$BUGSoutput$summary["beta0", "mean"]
+beta1 = model1$BUGSoutput$summary["beta1", "mean"]
+beta2 = model1$BUGSoutput$summary["beta2", "mean"]
+
+
+x = eval[2:3]
+y = eval[,1]
+xTb = beta0 + beta1*x[1] + beta2*x[2] 
+
+
+
+sig_fun = function(xTb){
+  probs = rep(NA, length(xTb[,1]))
+  for(i in 1:length(xTb[,1])){
+    probs[i] = 1/(1+exp(-xTb[i,1]))
+  }
+  return (probs)
+}
+
+
+predictions_t = function(probs, t){
+  predictions = rep(NA, length(probs))
+  for(i in 1:length(probs)){
+    if(probs[i]>t)
+      predictions[i] = 1
+    else
+      predictions[i] = 0
+  }
+  return(predictions)
+}
+
+probs = sig_fun(xTb)
+```
+
+```{r, echo=F,warning = F,fig.width=4, fig.height=4,fig.align='center'}
+roc = roc(y,probs)
+plot(roc, col="blue", lwd=2)
+roc
+```
+
+
+```{r, echo = F, results=T,warning = F}
+accuracy_values <- c()
+
+# Iterate through a range of threshold values
+for (threshold in seq(0, 1, by = 0.01)) {
+  # Make predictions based on the current threshold
+  predictions <- predictions_t(probs, threshold)
+  confusion <- confusionMatrix(as.factor(predictions), as.factor(y))
+  
+  accuracy <- confusion$overall['Accuracy']
+  accuracy <- round(accuracy, 2)
+
+  accuracy_values <- c(accuracy_values, accuracy)
+}
+
+max_accuracy <- max(accuracy_values)
+max_threshold <- seq(0, 1, by = 0.01)[which.max(accuracy_values)]
+
+print("The maximum accuracy is:")
+print(max_accuracy)
+print("The corresponding threshold is:")
+print(max_threshold)
+
+predictions <- predictions_t(probs, max_threshold)
+confusion <- confusionMatrix(as.factor(predictions), as.factor(y))
+precision <- confusion$byClass['Precision']
+precision <- round(precision, 2)
+print(precision)
+recall <- confusion$byClass['Recall']
+recall <- round(recall, 2)
+print(recall)
+```
+
+
+
+##### Confusion Matrix
+
+```{r, echo = F}
+pred <- predictions_t(probs, max_threshold)
+mat <- confusionMatrix(as.factor(pred), as.factor(y))
+```
+
+```{r, echo = F,fig.width=4, fig.height=4,fig.align='center'}
+data = as.data.frame(mat$table)
+ggplot(data, aes(x = Reference, y = Prediction)) +
+  geom_tile(aes(fill = Freq), color = "white") +
+  scale_fill_gradient(low = "white", high = "red") +
+  geom_text(aes(label = Freq), vjust = -1) +
+  labs(x = "Actual", y = "Predicted") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+\newpage
+
+##### Comparison with the Frequentist model
+
+
+```{r, echo= T,results = T, warning = F}
+freq2 = glm(Survived ~ Pclass + Sex , family = binomial(link = "logit"),data=train)
+```
+
+
+
+```{r, echo=F,results = T, warning = F}
+intercept <- -0.4744 
+pclass <- -0.8269 
+sex <- -1.2536 
+
+coefficients <- data.frame(
+  Variable = c("Intercept", "Pclass", "Sex" ),
+  Coefficient = c(intercept, pclass, sex)
+)
+
+coefficients
+```
+
+Residual Deviance: 540 	AIC: 546
+\
+even here the parameters are quite similar!
+
+##### Evaluation time for the frequentist Model1
+
+```{r, echo = F,warning = F,fig.width=4, fig.height=4,fig.align='center'}
+preds2 = predict(freq2, eval)
+y = eval$Survived
+roc2 = roc(y,preds2)
+plot(roc2, col="blue", lwd=2)
+roc2
+```
+\
+
+
+```{r, echo = F, results=T,warning=FALSE}
+
+# Calculate the predicted probabilities
+probs2 <- predict(freq2, type = "response",eval)
+accuracy_values2 <- c()
+
+# Iterate through a range of threshold values
+for (threshold in seq(0, 1, by = 0.01)) {
+  # Make predictions based on the current threshold
+  predictions <- predictions_t(probs2, threshold)
+  confusion2 <- confusionMatrix(as.factor(predictions), as.factor(y))
+  
+  accuracy <- confusion2$overall['Accuracy']
+  accuracy <- round(accuracy, 2)
+
+  accuracy_values2 <- c(accuracy_values2, accuracy)
+}
+
+max_accuracy <- max(accuracy_values2)
+max_threshold <- seq(0, 1, by = 0.01)[which.max(accuracy_values2)]
+
+print("The maximum accuracy is:")
+print(max_accuracy)
+print("The corresponding threshold is:")
+print(max_threshold)
+
+predictions <- predictions_t(probs2, max_threshold)
+confusion2 <- confusionMatrix(as.factor(predictions), as.factor(y))
+precision <- confusion2$byClass['Precision']
+precision <- round(precision, 2)
+print(precision)
+recall <- confusion2$byClass['Recall']
+recall <- round(recall, 2)
+print(recall)
+```
+
+
+##### Confusion Matrix
+
+
+```{r, echo = F,fig.width=4, fig.height=4,fig.align='center'}
+data = as.data.frame(confusion2$table)
+
+ggplot(data, aes(x = Reference, y = Prediction)) +
+  geom_tile(aes(fill = Freq), color = "white") +
+  scale_fill_gradient(low = "white", high = "red") +
+  geom_text(aes(label = Freq), vjust = -1) +
+  labs(x = "Actual", y = "Predicted") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+\newpage
+
+Now let's look at the models with the optimal thresholds in order to choose the best one for this problem
+```{r, echo = F, warning=F, message=F}
+finale = data.frame('BestThreshold' = c(0.55, 0.63, 0.61, 0.61),
+                    'Accuracy' = c(0.84,  0.83, 0.83, 0.83),
+                    'Precision' = c(0.86, 0.83, 0.79, 0.79),
+                    'Recall' = c(0.89, 0.92,0.99, 0.99),
+                    'AUROC' = c(0.863, 0.860, 0.825, 0.825),
+                    row.names = c('Model Bayesian', 'Model Frequentist', 
+                                  'Model1 Bayesian', 'Model1 Frequentist'))
+
+finale
+```
+
+```{r echo = F, warning=F, message=F}
+
+dics = data.frame('Bayesian_DIC' = c(524.7, 546.3),
+                  'Frequentist_AIC' = c(524.2, 546),
+                  row.names = c('Model', 'Model1'))
+dics
+```
+
+##### Conclusions
+
+After my analysis, I can say the model with the highest accuracy is the Model with 6 parameters  tuned with MCMC.
+However this is quite similar in terms of accuracy with the other models both Frequentist and Bayesian with 3 parameters, so the really effective features were Sex and Pclass.
+
+
+
+
