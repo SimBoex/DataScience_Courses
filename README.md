@@ -8,5 +8,6 @@ Here there are some projects/homeworks in which i was involved during my master
 - CLC stands for Cloud Computing
 - DM stands for Data Management
 - QME stands for Quantitative Models for Economic Analysis and Management 
-- Bio stands for Bioinformatics and Network Medecine 
+- Bio stands for Bioinformatics and Network Medecine
+- DPS stands for Data Privacy and Security
 
