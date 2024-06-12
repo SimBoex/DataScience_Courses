@@ -10,4 +10,5 @@ Here there are some projects/homeworks in which i was involved during my master
 - QME stands for Quantitative Models for Economic Analysis and Management 
 - Bio stands for Bioinformatics and Network Medecine
 - DPS stands for Data Privacy and Security
+- GG stands for Geomatics and Geoinformation
 
